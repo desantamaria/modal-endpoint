@@ -35,7 +35,7 @@ model_revision_id = "9ad870ac0b0e5e48ced156bb02f85d324b7275d2"
 
 @app.cls(
     image=image,
-    gpu="H100",
+    gpu="A10G",
     timeout=10 * MINUTES,
 )
 class Inference:
