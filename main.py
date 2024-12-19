@@ -70,7 +70,7 @@ class Inference:
         image_output = []
         for image in images:
             with io.BytesIO() as buf:
-                image.save(buf, format="JPEG")
+                image.save(buf, format="PNG")
                 image_output.append(buf.getvalue())
         torch.cuda.empty_cache()  # reduce fragmentation
         return image_output
@@ -81,5 +81,5 @@ class Inference:
             content=self.run.local(  # run in the same container
                 prompt, batch_size=1, seed=seed
             )[0],
-            media_type="image/jpeg",
+            media_type="image/png",
         )
