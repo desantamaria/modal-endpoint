@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 import modal.image
 import requests
 import os
+from dotenv import load_dotenv
 
-MINUTES = 60
+load_dotenv()
 
+# Download Requirements on Image Creation
 def download_model():
     from diffusers import AutoPipelineForText2Image
     import torch # type: ignore
@@ -24,14 +26,17 @@ image = (modal.Image.debian_slim()
 
 app = modal.App("sd", image=image)
 
+# Class Configuration
 @app.cls(
     image=image,
     gpu="A10G",
-    container_idle_timeout=10*MINUTES
+    container_idle_timeout=300, # 5 minutes
+    secrets=[modal.Secret.from_name("modal-api-key")]
 )
 
+# Model Class for sdxl-turbo 
 class Model:
-    
+    # Creation Function for Model
     @modal.build()
     @modal.enter()
     def load_weight(self):
@@ -44,17 +49,19 @@ class Model:
             variant="fp16"
         )
         self.pipe.to("cuda")
-        # self.API_KEY = os.environ["API_KEY"]
+        self.MODAL_API_KEY = os.environ["MODAL_API_KEY"]
         
+    # Generate Function for Model
     @modal.web_endpoint()
     def generate(self, request: Request, prompt: str = Query(..., description="The prompt for image generation")):
         
-        # api_key = request.headers.get("X-API-Key")
-        # if api_key != self.API_KEY:
-        #     raise HTTPException(
-        #         status_code=401,
-        #         detail="Unauthorized"
-        #     )
+        # Check if valid API Key is provided
+        api_key = request.headers.get("X-API-Key")
+        if api_key != self.MODAL_API_KEY:
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized"
+            )
         
         image = self.pipe(prompt, num_inference_steps=1, guidance_scale=0.0).images[0]
         
@@ -62,9 +69,26 @@ class Model:
         image.save(buffer, format="JPEG")
         
         return Response(content=buffer.getvalue(), media_type="image/jpeg")
+    
+    # Lightweight endpoint for keeping the container warm
+    @modal.web_endpoint()
+    def health(self):
+        return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
         
-
-# @app.function(
-#     schedule=modal.Cron(""),
-#     secrets=
-# )
+# Warm-keeping function that runs every 5 minutes
+@app.function(
+    schedule=modal.Cron("*/5 * * * *"),
+    secrets=[modal.Secret.from_name("modal-api-key")]
+)
+def keep_warm():
+    health_url = os.getenv("MODAL_HEALTH_URL")
+    generate_url = os.getenv("MODAL_GENERATE_URL")
+    
+    # First check health endpoint (no API Key needed)
+    health_response = requests.get(health_url)
+    print(f"Health check at {health_response.json()['timestamp']}")
+    
+    # Then make a test request to generate endpoint with API key
+    headers = {"X-API-Key": os.environ["API_KEY"]}
+    generate_response = requests.get(generate_url, headers=headers)
+    print(f"Generate endpoint tested successfully at: {datetime.now(timezone.utc).isoformat()}")
